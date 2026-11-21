@@ -26,10 +26,6 @@ export function loadBundles() {
     ids.add(b.id);
     if (!/^https:\/\/github\.com\/[^/]+\/[^/]+$/.test(b.upstream)) throw new Error(`bundles.yaml: ${b.id} upstream must be https://github.com/owner/repo`);
     if (!/^[0-9a-f]{40}$/.test(b.commit)) throw new Error(`bundles.yaml: ${b.id} commit must be a full 40-character SHA`);
-    // uv run installs the dev dependency group unless told not to; the licence check covers runtime only.
-    if (b.server.type === "uv" && b.server.mcp_config && !b.server.mcp_config.args?.includes("--no-dev")) {
-      throw new Error(`bundles.yaml: ${b.id} runs uv without --no-dev`);
-    }
   }
   return list;
 }

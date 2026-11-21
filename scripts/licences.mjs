@@ -22,10 +22,16 @@ export function resolveUvLock(text, root) {
     const optional = {};
     const opt = b.match(/\[package\.optional-dependencies\]\n([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
     for (const m of opt.matchAll(/^([\w-]+) = \[([\s\S]*?)\n?\]$/gm)) optional[m[1]] = parseDeps(m[2]);
+    // Dependency groups (dev and others): Claude Desktop installs them too, so they're checked.
+    const groups = [];
+    const dev = b.match(/\[package\.dev-dependencies\]\n([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
+    for (const m of dev.matchAll(/^([\w-]+) = \[([\s\S]*?)\n?\]$/gm)) groups.push(...parseDeps(m[2]));
     // A package can appear in several versions (python-version markers); every one is checked.
-    pkgs.set(name, [...(pkgs.get(name) ?? []), { version, deps, optional }]);
+    pkgs.set(name, [...(pkgs.get(name) ?? []), { version, deps, optional, groups }]);
   }
   if (!pkgs.has(root)) throw new Error(`uv.lock has no package "${root}"`);
+  // The root's dependency groups count as its dependencies.
+  for (const v of pkgs.get(root)) v.deps = [...v.deps, ...v.groups];
   const seen = new Map();
   const walk = (name, extras) => {
     const variants = pkgs.get(name);

@@ -40,6 +40,11 @@ dependencies = [
     { name = "lib-c", version = "2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [[package]]
 name = "lib-a"
 version = "1.2.3"
@@ -75,10 +80,10 @@ name = "pytest"
 version = "8.0"
 `;
 
-test("uv.lock: runtime dependencies on Windows, with extras and every version", () => {
+test("uv.lock: dependencies on Windows, with extras, dev groups and every version", () => {
   const deps = resolveUvLock(LOCK, "app").map((d) => `${d.name}@${d.version}`);
-  assert.deepEqual(deps, ["lib-a@1.2.3", "lib-b@4.0", "lib-c@1.0", "lib-c@2.0", "lib-cli@0.1"]);
-  assert.deepEqual(resolveUvLock(LOCK.replace(/\n/g, "\r\n"), "app").length, 5);
+  assert.deepEqual(deps, ["lib-a@1.2.3", "lib-b@4.0", "lib-c@1.0", "lib-c@2.0", "lib-cli@0.1", "pytest@8.0"]);
+  assert.deepEqual(resolveUvLock(LOCK.replace(/\n/g, "\r\n"), "app").length, 6);
   assert.equal(windowsMarker("sys_platform == 'linux'"), false);
   assert.equal(windowsMarker("sys_platform == 'win32'"), true);
   assert.throws(() => resolveUvLock(LOCK, "missing"));
@@ -104,9 +109,9 @@ test("manifest says who packaged it and keeps the project's name", () => {
   assert.match(packagedBy(BUNDLE, ["a.map"]), /left out these upstream files[\s\S]*a\.map/);
 });
 
-test("bundles.yaml in the repository loads, and uv bundles skip dev dependencies", async () => {
+test("bundles.yaml in the repository loads", async () => {
   const { loadBundles } = await import("../scripts/lib.mjs");
-  for (const b of loadBundles()) if (b.server.type === "uv") assert.ok(b.server.mcp_config.args.includes("--no-dev"), b.id);
+  assert.ok(loadBundles().length >= 1);
 });
 
 test("bundles.yaml version bump changes only tag, commit and version of one entry", () => {
