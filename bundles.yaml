@@ -1,0 +1,38 @@
+# Projects that Tresca packages as Claude Desktop extensions (.mcpb), unchanged.
+# Every value comes from the upstream project's own files at the pinned tag; see the comments.
+# A change here, merged to main, builds a GitHub Release named {id}-{version}.
+
+bundles:
+  - id: freecad-mcp
+    name: FreeCAD MCP
+    upstream: https://github.com/neka-nat/freecad-mcp
+    tag: v0.1.32
+    commit: 246f608d5de49089aadc41d2d91cfce2ad8a44cd
+    version: 0.1.32
+    licence: MIT                      # LICENSE at the tag; GitHub licence detection: MIT
+    licenceFile: LICENSE
+    # From pyproject.toml [project] description at the tag.
+    description: >-
+      MCP server for FreeCAD: create and edit models, run Python scripts, inspect documents and
+      run FEM analyses from Claude and other MCP clients.
+    author:                           # pyproject.toml [project] authors
+      name: neka-nat
+      url: https://github.com/neka-nat
+    ecosystem: pypi
+    lockfile: uv.lock                 # dependency licence check, Windows dependencies only
+    lockRoot: freecad-mcp
+    # uv server type (MANIFEST.md "UV Runtime (v0.4+)"): Claude Desktop installs Python and the
+    # locked dependencies. Runs the project's own console script (pyproject.toml [project.scripts]
+    # freecad-mcp = "freecad_mcp.server:main"; README: "uvx freecad-mcp").
+    server:
+      type: uv
+      entry_point: src/freecad_mcp/server.py
+      mcp_config:
+        command: uv
+        args: [run, --directory, "${__dirname}", freecad-mcp]
+    compatibility:
+      platforms: [win32]
+      runtimes:
+        python: ">=3.12"              # pyproject.toml requires-python
+    # No user_config: the server connects to FreeCAD on localhost by default (README "Quick start").
+    # What the user needs (FreeCAD, the add-on) is in the Tresca listing, not here.

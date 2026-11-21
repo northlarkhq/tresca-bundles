@@ -1,0 +1,44 @@
+# Weekly: looks for newer upstream tags and opens a pull request that bumps bundles.yaml.
+# The pull request runs the full build and licence check; merging it publishes the release.
+# Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+name: Upstream check
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/upstream-check.mjs
+      - name: Open a pull request
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUMMARY: ${{ steps.check.outputs.summary }}
+        run: |
+          set -euo pipefail
+          branch="upstream/$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add bundles.yaml
+          git commit -m "Upstream update: $SUMMARY"
+          git push -u origin "$branch"
+          gh pr create --base main --head "$branch" --title "Upstream update: $SUMMARY" \
+            --body "Newer upstream tags: $SUMMARY. The build on this pull request re-checks every dependency licence and the bundle contents. Review the upstream changes before merging; merging publishes the release."

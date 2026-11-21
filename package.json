@@ -1,0 +1,18 @@
+{
+  "name": "tresca-bundles",
+  "private": true,
+  "type": "module",
+  "description": "Builds Claude Desktop extension bundles (.mcpb) from open-source projects, unchanged, with their licences.",
+  "scripts": {
+    "test": "node --test tests/",
+    "licence-check": "node scripts/licence-check.mjs",
+    "build": "node scripts/build.mjs",
+    "upstream-check": "node scripts/upstream-check.mjs"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "2.1.2"
+  }
+}

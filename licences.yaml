@@ -1,0 +1,21 @@
+# Licences allowed for a packaged project and for every dependency it runs with.
+# SPEC: permissive licences only. A GPL-family or unknown licence stops that bundle.
+allowed:
+  - MIT
+  - BSD
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - Apache-2.0
+  - ISC
+  # Owner decision 2026-11-21: also allowed.
+  - MIT-0     # MIT without the attribution clause
+  - PSF-2.0   # Python Software Foundation licence (permissive)
+  - MPL-2.0   # only for dependencies used unmodified (file-level copyleft)
+
+# Packages whose registry metadata gives no licence. Each entry names the project's own licence
+# file, read on the date given. A version change needs a new check.
+overrides:
+  - package: rpds-py
+    licence: MIT
+    sourceUrl: https://github.com/crate-py/rpds/blob/main/LICENSE
+    checkedOn: "2026-11-21"

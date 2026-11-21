@@ -1,0 +1,52 @@
+# Builds every bundle in bundles.yaml and checks it. On main, publishes a GitHub Release
+# {id}-{version} for each bundle that doesn't have one yet. Existing releases are never replaced.
+name: Build bundles
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build, check and (on main) release each bundle
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          node -e "import('./scripts/lib.mjs').then(m => console.log(m.loadBundles().map(b => b.id + ' ' + b.id + '-' + b.version).join('\n')))" > bundles.txt
+          while read -r id release; do
+            if gh release view "$release" >/dev/null 2>&1; then
+              echo "$release: already released, not rebuilt"
+              continue
+            fi
+            node scripts/build.mjs "$id"
+            file="out/$release.mcpb"
+            (cd out && sha256sum "$release.mcpb" > "$release.mcpb.sha256")
+            cp "out/$release.licences.md" "out/$release-DEPENDENCY-LICENCES.md"
+            if [ "$PUBLISH" = "true" ]; then
+              gh release create "$release" "$file" "out/$release.mcpb.sha256" "out/$release-DEPENDENCY-LICENCES.md" \
+                --title "$release" --notes-file "out/$release.notes.md" --target "$GITHUB_SHA"
+            fi
+          done < bundles.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bundles
+          path: out/
+          if-no-files-found: ignore
