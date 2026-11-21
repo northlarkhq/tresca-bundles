@@ -24,12 +24,14 @@ bundles:
     # uv server type (MANIFEST.md "UV Runtime (v0.4+)"): Claude Desktop installs Python and the
     # locked dependencies. Runs the project's own console script (pyproject.toml [project.scripts]
     # freecad-mcp = "freecad_mcp.server:main"; README: "uvx freecad-mcp").
+    # --no-dev: uv run would otherwise also install the dev group (pytest), which the licence
+    # check doesn't cover. Found when testing in Claude Desktop 4.29.0, 2026-11-21.
     server:
       type: uv
       entry_point: src/freecad_mcp/server.py
       mcp_config:
         command: uv
-        args: [run, --directory, "${__dirname}", freecad-mcp]
+        args: [run, --no-dev, --directory, "${__dirname}", freecad-mcp]
     compatibility:
       platforms: [win32]
       runtimes:

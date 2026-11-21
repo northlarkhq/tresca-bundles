@@ -104,6 +104,11 @@ test("manifest says who packaged it and keeps the project's name", () => {
   assert.match(packagedBy(BUNDLE, ["a.map"]), /left out these upstream files[\s\S]*a\.map/);
 });
 
+test("bundles.yaml in the repository loads, and uv bundles skip dev dependencies", async () => {
+  const { loadBundles } = await import("../scripts/lib.mjs");
+  for (const b of loadBundles()) if (b.server.type === "uv") assert.ok(b.server.mcp_config.args.includes("--no-dev"), b.id);
+});
+
 test("bundles.yaml version bump changes only tag, commit and version of one entry", () => {
   const text = ["bundles:", "  - id: a", "    tag: v1 # pinned", "    commit: c1", "    version: 1", "  - id: b", "    tag: v5", "    commit: c5", "    version: 5", ""].join("\n");
   const out = setVersion(text, "a", { tag: "v2", commit: "c2", version: "2" });
