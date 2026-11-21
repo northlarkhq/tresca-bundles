@@ -26,6 +26,10 @@ export function loadBundles() {
     ids.add(b.id);
     if (!/^https:\/\/github\.com\/[^/]+\/[^/]+$/.test(b.upstream)) throw new Error(`bundles.yaml: ${b.id} upstream must be https://github.com/owner/repo`);
     if (!/^[0-9a-f]{40}$/.test(b.commit)) throw new Error(`bundles.yaml: ${b.id} commit must be a full 40-character SHA`);
+    if (b.revision !== undefined && !(Number.isInteger(b.revision) && b.revision >= 2))
+      throw new Error(`bundles.yaml: ${b.id} revision must be a whole number from 2 (leave it out for the first packaging)`);
+    if (b.python !== undefined && !/^3\.\d+$/.test(String(b.python)))
+      throw new Error(`bundles.yaml: ${b.id} python must look like "3.13"`);
   }
   return list;
 }
@@ -36,8 +40,63 @@ export function findBundle(id) {
   return b;
 }
 
-export const releaseName = (b) => `${b.id}-${b.version}`;
-export const bundleFile = (b) => `${b.id}-${b.version}.mcpb`;
+/**
+ * Claude Desktop installs a uv bundle with `uv sync` in the bundle folder (mcp_config.args aren't used for
+ * that), and uv takes the Python from `.python-version`. Without one it downloads the newest Python, which
+ * may have no Windows wheels yet, so the install fails compiling them (Python 3.15 and pyyaml, 2026-11-22).
+ * Returns the Python the bundle pins, from upstream's .python-version or bundles.yaml `python`.
+ */
+export function pinnedPython(b, upstreamPythonVersion) {
+  if (b.server?.type !== "uv") {
+    if (b.python !== undefined) throw new Error(`${b.id}: python only applies to uv bundles`);
+    return null;
+  }
+  if (upstreamPythonVersion !== undefined && b.python !== undefined) throw new Error(`${b.id}: upstream has .python-version, so leave python out`);
+  const v = String(b.python ?? upstreamPythonVersion ?? "").trim();
+  if (!v) throw new Error(`${b.id}: upstream has no .python-version, so set python in bundles.yaml (for example "3.13")`);
+  if (!/^3\.\d+$/.test(v)) throw new Error(`${b.id}: Python "${v}" should be a minor version such as 3.13`);
+  return v;
+}
+
+/**
+ * The packages (name and version, as resolved for Windows) with no ready-built wheel that Windows x64 can use
+ * on that Python, which uv would have to compile. A package locked at several versions passes when any
+ * version has one (the others are for other Pythons).
+ */
+export function missingWheels(lockText, deps, python) {
+  const cp = `cp${python.replace(".", "")}`;
+  const minor = Number(python.split(".")[1]);
+  const wheels = new Map();
+  for (const block of lockText.replace(/\r\n/g, "\n").split("\n[[package]]").slice(1)) {
+    const name = block.match(/^name = "([^"]+)"/m)?.[1];
+    const version = block.match(/^version = "([^"]+)"/m)?.[1];
+    wheels.set(`${name}@${version}`, [...block.matchAll(/\/([^/"]+\.whl)"/g)].map((m) => m[1]));
+  }
+  const usable = (w) => {
+    const [py, abi, plat] = w.slice(0, -4).split("-").slice(-3);
+    if (plat !== "any" && !plat.split(".").includes("win_amd64")) return false;
+    const pys = py.split(".");
+    if (pys.some((t) => t === "py3" || t === "py2.py3")) return true;
+    if (pys.includes(cp)) return true;
+    // Stable ABI: built for cp3N, runs on any later 3.x.
+    return abi === "abi3" && pys.some((t) => /^cp3\d+$/.test(t) && Number(t.slice(3)) <= minor);
+  };
+  const byName = new Map();
+  for (const d of deps) byName.set(d.name, [...(byName.get(d.name) ?? []), d.version]);
+  const missing = [];
+  for (const [name, versions] of byName) {
+    // Packages uv builds from the project itself (editable, virtual) have no wheels and need none.
+    const known = versions.filter((v) => wheels.has(`${name}@${v}`) && wheels.get(`${name}@${v}`).length);
+    if (!known.length) continue;
+    if (!known.some((v) => wheels.get(`${name}@${v}`).some(usable))) missing.push(`${name} ${versions.join("/")}`);
+  }
+  return missing;
+}
+
+// A repackaging of the same upstream version (revision 2, 3, ...) gets its own release, since releases are
+// never replaced; the manifest keeps the upstream version.
+export const releaseName = (b) => `${b.id}-${b.version}${b.revision ? `-r${b.revision}` : ""}`;
+export const bundleFile = (b) => `${releaseName(b)}.mcpb`;
 
 // ---- Licences -------------------------------------------------------------
 
@@ -126,7 +185,9 @@ export function packagedBy(b, excluded) {
     `This Claude Desktop extension contains **${b.name}** by ${b.author.name}, from`,
     `${b.upstream} at tag \`${b.tag}\` (commit \`${b.commit}\`), unchanged.`,
     ``,
-    `Tresca added only these files: \`manifest.json\`, \`PACKAGED-BY.md\` and \`DEPENDENCY-LICENCES.md\`.`,
+    b.python !== undefined
+      ? `Tresca added only these files: \`manifest.json\`, \`PACKAGED-BY.md\`, \`DEPENDENCY-LICENCES.md\` and \`.python-version\` (Python ${b.python}, so Claude Desktop installs a Python every dependency has a Windows wheel for).`
+      : `Tresca added only these files: \`manifest.json\`, \`PACKAGED-BY.md\` and \`DEPENDENCY-LICENCES.md\`.`,
     `The project's own licence is in \`${b.licenceFile ?? "LICENSE"}\` (${b.licence}).`,
     ...(excluded.length ? [``, `The MCP bundle tool left out these upstream files:`, ``, ...excluded.map((f) => `- \`${f}\``)] : []),
     ``,

@@ -1,5 +1,5 @@
 # Builds every bundle in bundles.yaml and checks it. On main, publishes a GitHub Release
-# {id}-{version} for each bundle that doesn't have one yet. Existing releases are never replaced.
+# {id}-{version} (or {id}-{version}-r{revision}) for each bundle that doesn't have one yet. Existing releases are never replaced.
 name: Build bundles
 
 on:
@@ -29,7 +29,7 @@ jobs:
           PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
-          node -e "import('./scripts/lib.mjs').then(m => console.log(m.loadBundles().map(b => b.id + ' ' + b.id + '-' + b.version).join('\n')))" > bundles.txt
+          node -e "import('./scripts/lib.mjs').then(m => console.log(m.loadBundles().map(b => b.id + ' ' + m.releaseName(b)).join('\n')))" > bundles.txt
           while read -r id release; do
             if gh release view "$release" >/dev/null 2>&1; then
               echo "$release: already released, not rebuilt"

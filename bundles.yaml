@@ -1,6 +1,11 @@
 # Projects that Tresca packages as Claude Desktop extensions (.mcpb), unchanged.
 # Every value comes from the upstream project's own files at the pinned tag; see the comments.
-# A change here, merged to main, builds a GitHub Release named {id}-{version}.
+# A change here, merged to main, builds a GitHub Release named {id}-{version}, or {id}-{version}-r{revision}
+# when the same upstream version is packaged again (releases are never replaced; the manifest keeps the
+# upstream version).
+# uv bundles need a .python-version: Claude Desktop installs them with `uv sync`, which otherwise takes the
+# newest Python, and a new Python has no Windows wheels yet for some packages, so the install fails
+# compiling them (Python 3.15, 2026-11-22). Upstream's file is used when it has one; otherwise set `python`.
 
 bundles:
   - id: freecad-mcp
@@ -46,6 +51,10 @@ bundles:
     tag: v1.8.0
     commit: 6f6a538255ca9f885232e845ac32f10b4433fe3e
     version: 1.8.0
+    # r2: adds .python-version. 1.8.0 failed to install on Python 3.15 (pyyaml has no 3.15 wheel yet).
+    revision: 2
+    # requires-python >=3.11; every package locked for Windows has a 3.13 wheel (checked by the build).
+    python: "3.13"
     licence: MIT                      # LICENSE at the tag; pyproject.toml license = "MIT"
     licenceFile: LICENSE
     # README at the tag, opening lines, without the word "Production-grade" (Tresca never says "production";
