@@ -1,6 +1,7 @@
 // Weekly: looks for a newer upstream tag for each bundle and updates bundles.yaml in place
-// (tag, commit and version only; comments and everything else stay). The workflow then opens a
-// pull request for the owner, whose merge builds the new release.
+// (tag, commit and version only; comments and everything else stay). A tag is taken only once its
+// commit is at least MIN_AGE_DAYS old. The workflow builds and checks the new version, and only if
+// that passes commits to main and publishes (owner decision 2026-11-21: no manual review).
 //   node scripts/upstream-check.mjs            update bundles.yaml
 //   node scripts/upstream-check.mjs --dry-run  only report
 import fs from "node:fs";
@@ -13,6 +14,13 @@ async function gh(pathname) {
   const r = await fetch(`https://api.github.com/${pathname}`, { headers, signal: AbortSignal.timeout(30_000) });
   if (!r.ok) throw new Error(`GitHub API ${pathname}: HTTP ${r.status}`);
   return r.json();
+}
+
+export const MIN_AGE_DAYS = 7;
+
+/** True when a release made at iso is at least `days` old on `today`. */
+export function oldEnough(iso, today, days = MIN_AGE_DAYS) {
+  return today.getTime() - new Date(iso).getTime() >= days * 86_400_000;
 }
 
 const versionOf = (tag) => tag.replace(/^v/i, "");
@@ -56,13 +64,21 @@ async function main() {
       console.log(`${b.id}: ${b.tag} is current`);
       continue;
     }
-    const commit = (await gh(`repos/${repo}/commits/${encodeURIComponent(tag)}`)).sha;
-    console.log(`${b.id}: ${b.tag} -> ${tag} (${commit})`);
-    text = setVersion(text, b.id, { tag, commit, version: versionOf(tag) });
-    changed.push(`${b.id} ${b.tag} -> ${tag}`);
+    const c = await gh(`repos/${repo}/commits/${encodeURIComponent(tag)}`);
+    const date = c.commit?.committer?.date ?? c.commit?.author?.date;
+    if (!date || !oldEnough(date, new Date())) {
+      console.log(`${b.id}: ${tag} (${date ?? "no date"}) is newer than ${MIN_AGE_DAYS} days; waiting`);
+      continue;
+    }
+    console.log(`${b.id}: ${b.tag} -> ${tag} (${c.sha}, ${date})`);
+    text = setVersion(text, b.id, { tag, commit: c.sha, version: versionOf(tag) });
+    changed.push({ id: b.id, from: b.tag, to: tag });
   }
   if (!dry && changed.length) fs.writeFileSync(file, text);
-  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed.length ? "true" : "false"}\nsummary=${changed.join("; ")}\n`);
+  if (process.env.GITHUB_OUTPUT) {
+    const summary = changed.map((x) => `${x.id} ${x.from} -> ${x.to}`).join("; ");
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed.length ? "true" : "false"}\nids=${changed.map((x) => x.id).join(" ")}\nsummary=${summary}\n`);
+  }
 }
 
 // Run only when started directly, so tests can import the helpers.

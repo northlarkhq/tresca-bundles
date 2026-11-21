@@ -26,7 +26,7 @@ Bundles are published as GitHub Releases named `{id}-{version}`, each with the `
 | `scripts/build.mjs` | Builds and checks one bundle: `npm run build -- <id>` |
 | `scripts/upstream-check.mjs` | Looks for newer upstream tags and updates `bundles.yaml` |
 | `.github/workflows/build.yml` | On every push and pull request: tests and builds. On `main`: publishes a release for each new `{id}-{version}` |
-| `.github/workflows/upstream-check.yml` | Weekly: opens a pull request when an upstream project has a newer tag |
+| `.github/workflows/upstream-check.yml` | Weekly: takes a newer upstream tag once it is at least 7 days old, builds and checks it, and only if that passes commits it to `main` and publishes the release |
 
 To add a project, add an entry to `bundles.yaml` and open a pull request. The build checks it.
 

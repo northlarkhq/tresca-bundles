@@ -3,7 +3,13 @@ import { test } from "node:test";
 import zlib from "node:zlib";
 import { buildManifest, licenceDecision, normaliseLicence, packagedBy, readZip } from "../scripts/lib.mjs";
 import { resolveNpmLock, resolveUvLock, windowsMarker } from "../scripts/licences.mjs";
-import { setVersion } from "../scripts/upstream-check.mjs";
+import { oldEnough, setVersion } from "../scripts/upstream-check.mjs";
+
+test("upstream tags are taken only after seven days", () => {
+  const today = new Date("2026-11-21T06:00:00Z");
+  assert.equal(oldEnough("2026-11-14T06:00:00Z", today), true);
+  assert.equal(oldEnough("2026-11-15T06:00:00Z", today), false);
+});
 
 const ALLOWED = ["MIT", "BSD", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC", "MIT-0", "PSF-2.0", "MPL-2.0"];
 

@@ -1,6 +1,7 @@
-# Weekly: looks for newer upstream tags and opens a pull request that bumps bundles.yaml.
-# The pull request runs the full build and licence check; merging it publishes the release.
-# Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+# Weekly: takes newer upstream tags (at least 7 days old), builds and checks them, and only if
+# everything passes commits the bump to main and starts the release build.
+# Owner decision 2026-11-21: no manual review; the 7-day wait, the licence check and the
+# unchanged-files check are the safeguards. A failure leaves main and the releases unchanged.
 name: Upstream check
 
 on:
@@ -10,7 +11,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
+  actions: write # to start the release build; pushes by this workflow don't trigger it
 
 jobs:
   check:
@@ -26,19 +27,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/upstream-check.mjs
-      - name: Open a pull request
+      - name: Build and check the new versions
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IDS: ${{ steps.check.outputs.ids }}
+        run: |
+          set -euo pipefail
+          npm test
+          for id in $IDS; do node scripts/build.mjs "$id"; done
+      - name: Commit to main and start the release build
         if: steps.check.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SUMMARY: ${{ steps.check.outputs.summary }}
         run: |
           set -euo pipefail
-          branch="upstream/$(date -u +%Y-%m-%d)"
           git config user.name "github-actions[bot]"
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$branch"
           git add bundles.yaml
           git commit -m "Upstream update: $SUMMARY"
-          git push -u origin "$branch"
-          gh pr create --base main --head "$branch" --title "Upstream update: $SUMMARY" \
-            --body "Newer upstream tags: $SUMMARY. The build on this pull request re-checks every dependency licence and the bundle contents. Review the upstream changes before merging; merging publishes the release."
+          git push origin HEAD:main
+          gh workflow run build.yml --ref main
