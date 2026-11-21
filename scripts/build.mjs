@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { checkDependencies, licenceReport } from "./licences.mjs";
-import { ROOT, buildManifest, bundleFile, findBundle, listFiles, packagedBy, readZip, releaseName, sha256 } from "./lib.mjs";
+import { ROOT, buildManifest, bundleFile, findBundle, listFiles, packagedBy, readZip, releaseName, settingsNotFound, sha256 } from "./lib.mjs";
 
 const ADDED = ["manifest.json", "PACKAGED-BY.md", "DEPENDENCY-LICENCES.md"];
 
@@ -64,6 +64,11 @@ async function main() {
   const upstreamFiles = listFiles(upstreamDir);
   for (const f of ADDED) if (upstreamFiles.includes(f)) throw new Error(`upstream already has ${f}; packaging it unchanged isn't possible`);
   if (!upstreamFiles.includes(b.licenceFile ?? "LICENSE")) throw new Error(`upstream has no ${b.licenceFile ?? "LICENSE"}`);
+  // Settings the bundle sets (server.mcp_config.env) must still exist upstream: a renamed setting would be
+  // ignored silently, and a lock-down setting with it.
+  const sourceTexts = upstreamFiles.filter((f) => /\.(py|js|mjs|ts)$/.test(f)).map((f) => fs.readFileSync(path.join(upstreamDir, f), "utf8"));
+  const unknown = settingsNotFound(Object.keys(b.server?.mcp_config?.env ?? {}), sourceTexts);
+  if (unknown.length) throw new Error(`upstream source never reads these settings the bundle sets: ${unknown.join(", ")}`);
 
   // 3. Dependency licences.
   const result = await checkDependencies(b, fs.readFileSync(path.join(upstreamDir, b.lockfile), "utf8"));

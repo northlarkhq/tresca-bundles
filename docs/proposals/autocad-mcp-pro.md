@@ -1,7 +1,13 @@
 # Proposal: package AutoCAD MCP Pro
 
-Status: **proposal, for the owner's decision** (2026-11-22). Nothing is added to `bundles.yaml` until the
-decisions below are made.
+Status: **approved by the owner on 2026-11-22**: all five licences allowed, and "go ahead with the bundle" as
+proposed (lock-down, description). The entry is in `bundles.yaml`. Still open: the live check in section 6,
+which should come before the first release is used.
+
+What the build needed (same change): an `extras` setting so the licence check covers the `com` and `pdf`
+extras (92 packages instead of the core set), support for licences that all apply ("A AND B", numpy), the name
+"The Unlicense (Unlicense)", and a check that every setting the bundle sets is still read by the upstream code.
+First build: 92 dependencies, all allowed.
 
 ## Recommendation
 

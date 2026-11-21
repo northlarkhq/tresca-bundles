@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import zlib from "node:zlib";
-import { buildManifest, licenceDecision, normaliseLicence, packagedBy, readZip } from "../scripts/lib.mjs";
+import { buildManifest, licenceDecision, normaliseLicence, packagedBy, readZip, settingsNotFound } from "../scripts/lib.mjs";
 import { resolveNpmLock, resolveUvLock, windowsMarker } from "../scripts/licences.mjs";
 import { oldEnough, setVersion } from "../scripts/upstream-check.mjs";
 
@@ -19,6 +19,7 @@ test("licence names from PyPI and lock files normalise to SPDX-like ids", () => 
   assert.deepEqual(normaliseLicence("Mozilla Public License 2.0 (MPL 2.0)"), ["MPL-2.0"]);
   assert.deepEqual(normaliseLicence("Apache-2.0 OR BSD-3-Clause"), ["Apache-2.0", "BSD-3-Clause"]);
   assert.deepEqual(normaliseLicence(""), []);
+  assert.deepEqual(normaliseLicence("The Unlicense (Unlicense)"), ["Unlicense"]); // email-validator's classifier
 });
 
 test("licence decisions follow the allowed list", () => {
@@ -31,6 +32,22 @@ test("licence decisions follow the allowed list", () => {
   assert.match(licenceDecision("Proprietary", ALLOWED).reason, /not allowed/);
   // Dual licence with a permissive alternative passes.
   assert.equal(licenceDecision("GPL-2.0 OR MIT", ALLOWED).ok, true);
+});
+
+test("licences that all apply (AND) pass only when every one is allowed", () => {
+  const numpy = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0";
+  assert.match(licenceDecision(numpy, ALLOWED).reason, /not allowed: BSD-3-Clause AND 0BSD/);
+  assert.equal(licenceDecision(numpy, [...ALLOWED, "0BSD", "Zlib", "CC0-1.0"]).ok, true);
+  assert.deepEqual(normaliseLicence(numpy), [numpy]);
+  assert.equal(licenceDecision("Apache-2.0 AND BSD-3-Clause", ALLOWED).ok, true);
+  // A copyleft part makes the whole package copyleft, unless another alternative is allowed.
+  assert.match(licenceDecision("MIT AND GPL-3.0", ALLOWED).reason, /copyleft/);
+  assert.equal(licenceDecision("(MIT AND GPL-3.0) OR Apache-2.0", ALLOWED).ok, true);
+});
+
+test("settings the bundle sets must be read somewhere upstream", () => {
+  const src = [`x = os.environ.get("MAX_TOOL_COST")`, `y = os.environ.get('CAD_LAUNCH', "auto")`];
+  assert.deepEqual(settingsNotFound(["MAX_TOOL_COST", "CAD_LAUNCH", "RENAMED"], src), ["RENAMED"]);
 });
 
 const LOCK = `version = 1
@@ -93,6 +110,14 @@ test("uv.lock: dependencies on Windows, with extras, dev groups and every versio
   assert.equal(windowsMarker("sys_platform == 'linux'"), false);
   assert.equal(windowsMarker("sys_platform == 'win32'"), true);
   assert.throws(() => resolveUvLock(LOCK, "missing"));
+});
+
+test("uv.lock: the project's own extras the bundle runs with are checked too", () => {
+  const withExtras = LOCK.replace(`[[package]]\nname = "lib-a"`, `[package.optional-dependencies]\ncom = [\n    { name = "lib-com" },\n]\n\n[[package]]\nname = "lib-a"`)
+    + `\n[[package]]\nname = "lib-com"\nversion = "3.0"\n`;
+  const plain = resolveUvLock(withExtras, "app").map((d) => d.name);
+  assert.equal(plain.includes("lib-com"), false);
+  assert.equal(resolveUvLock(withExtras, "app", ["com"]).map((d) => d.name).includes("lib-com"), true);
 });
 
 test("package-lock.json: production packages only", () => {

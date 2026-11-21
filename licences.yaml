@@ -11,6 +11,12 @@ allowed:
   - MIT-0     # MIT without the attribution clause
   - PSF-2.0   # Python Software Foundation licence (permissive)
   - MPL-2.0   # only for dependencies used unmodified (file-level copyleft)
+  # Owner decision 2026-11-22 (AutoCAD MCP Pro proposal, docs/proposals/autocad-mcp-pro.md): also allowed.
+  - MIT-CMU    # Pillow: the historical PIL licence (HPND-style), permissive
+  - 0BSD       # numpy (part): zero-clause BSD
+  - Zlib       # numpy (part)
+  - CC0-1.0    # numpy (part): public-domain dedication
+  - Unlicense  # email-validator: public-domain dedication
 
 # Packages whose registry metadata gives no licence. Each entry names the project's own licence
 # file, read on the date given. A version change needs a new check.
@@ -19,3 +25,9 @@ overrides:
     licence: MIT
     sourceUrl: https://github.com/crate-py/rpds/blob/main/LICENSE
     checkedOn: "2026-11-21"
+  # PyPI says only "Dual License". Its LICENSE: Apache-2.0 for contributions after 2017-12-01 (and
+  # re-licensed code), BSD-3-Clause for the rest, so both apply.
+  - package: python-dateutil
+    licence: Apache-2.0 AND BSD-3-Clause
+    sourceUrl: https://github.com/dateutil/dateutil/blob/2.9.0.post0/LICENSE
+    checkedOn: "2026-11-22"

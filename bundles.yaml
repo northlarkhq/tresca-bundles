@@ -38,3 +38,70 @@ bundles:
         python: ">=3.12"              # pyproject.toml requires-python
     # No user_config: the server connects to FreeCAD on localhost by default (README "Quick start").
     # What the user needs (FreeCAD, the add-on) is in the Tresca listing, not here.
+
+  # Owner decision 2026-11-22: packaged locked down (docs/proposals/autocad-mcp-pro.md).
+  - id: autocad-mcp-pro
+    name: AutoCAD MCP Pro
+    upstream: https://github.com/U-C4N/Autocad-MCP
+    tag: v1.8.0
+    commit: 6f6a538255ca9f885232e845ac32f10b4433fe3e
+    version: 1.8.0
+    licence: MIT                      # LICENSE at the tag; pyproject.toml license = "MIT"
+    licenceFile: LICENSE
+    # README at the tag, opening lines, without the word "Production-grade" (Tresca never says "production";
+    # owner decision 2026-11-22): "Production-grade AutoCAD automation for AI agents. Live through COM on
+    # Windows, or headless through ezdxf anywhere - one typed contract, two engines."
+    description: >-
+      AutoCAD automation for AI agents. Live through COM on Windows, or headless through ezdxf anywhere: one
+      typed contract, two engines. In this bundle the raw command, LISP and destructive tools are switched off
+      and file access is limited to the folder you choose.
+    author:                           # pyproject.toml [project] authors
+      name: Umutcan Edizsalan
+      url: https://github.com/U-C4N
+    ecosystem: pypi
+    lockfile: uv.lock
+    lockRoot: autocad-mcp-pro
+    # The project's own extras the bundle runs with (pyproject.toml [project.optional-dependencies]): `com`
+    # (pywin32, Pillow) for live AutoCAD, `pdf` (matplotlib) for any rendering. The licence check covers them.
+    extras: [com, pdf]
+    # uv server type, as for FreeCAD MCP. Console script: pyproject.toml [project.scripts]
+    # autocad-mcp = "server:main". Settings are environment variables only (config.py, os.environ).
+    server:
+      type: uv
+      entry_point: server.py
+      mcp_config:
+        command: uv
+        args: [run, --directory, "${__dirname}", --extra, com, --extra, pdf, autocad-mcp]
+        env:
+          # Lock-down (policy.py: read < safe < mutate < destructive < escape). `mutate` allows reading and
+          # normal edits, and removes the destructive tools and system_run_command / system_run_lisp.
+          MAX_TOOL_COST: mutate
+          DANGEROUS_COMMANDS_ENABLED: "false"
+          # Work only in the AutoCAD session the user opened; never start one (README, CAD_LAUNCH, #19).
+          CAD_LAUNCH: never
+          AUTOCAD_MCP_BACKEND: auto
+          # The default since 1.8.0: three discovery tools instead of 240.
+          DISCOVERY_MODE: search
+          # config.py splits ALLOWED_PATHS on commas; one folder from the user.
+          ALLOWED_PATHS: "${user_config.project_folder}"
+          READ_ONLY: "${user_config.read_only}"
+    user_config:
+      project_folder:
+        type: directory
+        title: Project folder
+        description: >-
+          The only folder AutoCAD MCP Pro may read and write files in. Choose the folder that holds the
+          drawings you work on, and work on copies.
+        required: true
+      read_only:
+        type: boolean
+        title: Read only
+        description: Only reading tools run, and no file is written.
+        default: false
+        required: false
+    compatibility:
+      platforms: [win32]
+      runtimes:
+        python: ">=3.11"              # pyproject.toml requires-python
+    # What the user needs (Windows, full AutoCAD running with a drawing open; tested by hand on AutoCAD 2026)
+    # goes in the Tresca listing, not here.
