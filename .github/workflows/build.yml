@@ -39,8 +39,14 @@ jobs:
             file="out/$release.mcpb"
             (cd out && sha256sum "$release.mcpb" > "$release.mcpb.sha256")
             cp "out/$release.licences.md" "out/$release-DEPENDENCY-LICENCES.md"
+            assets=("$file" "out/$release.mcpb.sha256" "out/$release-DEPENDENCY-LICENCES.md")
+            # A bundle whose project ships a skill also gets the .skill file (bundles.yaml `skill`).
+            if [ -f "out/$release.skill" ]; then
+              (cd out && sha256sum "$release.skill" > "$release.skill.sha256")
+              assets+=("out/$release.skill" "out/$release.skill.sha256")
+            fi
             if [ "$PUBLISH" = "true" ]; then
-              gh release create "$release" "$file" "out/$release.mcpb.sha256" "out/$release-DEPENDENCY-LICENCES.md" \
+              gh release create "$release" "${assets[@]}" \
                 --title "$release" --notes-file "out/$release.notes.md" --target "$GITHUB_SHA"
             fi
           done < bundles.txt

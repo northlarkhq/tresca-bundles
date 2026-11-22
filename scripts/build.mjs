@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { checkDependencies, licenceReport } from "./licences.mjs";
-import { ROOT, buildManifest, bundleFile, findBundle, listFiles, missingWheels, packagedBy, pinnedPython, readZip, releaseName, settingsNotFound, sha256 } from "./lib.mjs";
+import { ROOT, buildManifest, bundleFile, findBundle, listFiles, missingWheels, packagedBy, pinnedPython, readZip, releaseName, settingsNotFound, sha256, skillEntries, skillFile, writeZip } from "./lib.mjs";
 
 const ADDED = ["manifest.json", "PACKAGED-BY.md", "DEPENDENCY-LICENCES.md"];
 
@@ -114,9 +114,36 @@ async function main() {
   if (b.server.type === "uv" && !entries.has(b.lockfile)) throw new Error(`bundle lacks ${b.lockfile}, so uv wouldn't install the checked versions`);
 
   const hash = sha256(fs.readFileSync(file));
+
+  // 6. The skill, when the project ships one: Claude Desktop can't load a skill from a .mcpb, so it goes
+  // out as its own .skill file (a plain zip of the skill folder) that Tresca hands over after the bundle.
+  let skill = null;
+  if (b.skill) {
+    const text = [
+      `# Packaged by Tresca`,
+      ``,
+      `This Claude skill is **${b.name}**'s own skill, by ${b.author.name}, from ${b.upstream} at tag \`${b.tag}\``,
+      `(commit \`${b.commit}\`), folder \`${b.skill.folder}\`, unchanged.`,
+      ``,
+      `Tresca added only \`${b.licenceFile ?? "LICENSE"}\` (the project's licence, ${b.licence}) and this file.`,
+      `It goes with the Claude Desktop extension ${bundleFile(b)} from the same release.`,
+      ``,
+    ].join("\n");
+    const s = skillEntries(b, upstreamDir, text);
+    const skillPath = path.join(out, skillFile(b));
+    fs.writeFileSync(skillPath, writeZip(s.entries));
+    const back = readZip(fs.readFileSync(skillPath));
+    for (const [n, data] of s.entries) if (!back.has(n) || sha256(back.get(n)) !== sha256(data)) throw new Error(`skill entry ${n} didn't survive packing`);
+    if ([...back.keys()].some((n) => !n.startsWith(`${s.name}/`))) throw new Error("a skill entry sits outside its top-level folder");
+    if (fs.statSync(skillPath).size > 30 * 1024 * 1024) throw new Error("the skill file is over Claude Desktop's 30 MB limit");
+    skill = { file: skillFile(b), hash: sha256(fs.readFileSync(skillPath)), files: s.upstreamFiles.length };
+    console.log(`${id}: ${skill.file} ${skill.hash} (${skill.files} upstream files)`);
+  }
+
   const sums = path.join(out, "SHA256SUMS");
-  const lines = (fs.existsSync(sums) ? fs.readFileSync(sums, "utf8").split("\n").filter(Boolean) : []).filter((l) => !l.endsWith(`  ${bundleFile(b)}`));
-  fs.writeFileSync(sums, `${[...lines, `${hash}  ${bundleFile(b)}`].join("\n")}\n`);
+  const mine = [bundleFile(b), ...(skill ? [skill.file] : [])];
+  const lines = (fs.existsSync(sums) ? fs.readFileSync(sums, "utf8").split("\n").filter(Boolean) : []).filter((l) => !mine.some((f) => l.endsWith(`  ${f}`)));
+  fs.writeFileSync(sums, `${[...lines, `${hash}  ${bundleFile(b)}`, ...(skill ? [`${skill.hash}  ${skill.file}`] : [])].join("\n")}\n`);
   fs.writeFileSync(
     path.join(out, `${releaseName(b)}.notes.md`),
     [
@@ -127,6 +154,11 @@ async function main() {
       `- ${upstreamFiles.length - excluded.length} upstream files included, each byte-identical to the upstream source.${excluded.length ? ` Left out by the bundle tool: ${excluded.join(", ")}.` : ""}`,
       `- Dependency licences: ${result.rows.length} packages checked on ${today}, all allowed (DEPENDENCY-LICENCES.md).`,
       `- SHA-256 of \`${bundleFile(b)}\`: \`${hash}\``,
+      ...(skill
+        ? [
+            `- Skill: \`${skill.file}\`, the project's own skill (\`${b.skill.folder}\`, ${skill.files} files, unchanged) plus its licence and PACKAGED-BY.md. Claude Desktop can't load a skill from an extension, so it is a separate file. SHA-256: \`${skill.hash}\``,
+          ]
+        : []),
       ``,
     ].join("\n"),
   );

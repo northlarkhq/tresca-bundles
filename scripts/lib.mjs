@@ -28,6 +28,8 @@ export function loadBundles() {
     if (!/^[0-9a-f]{40}$/.test(b.commit)) throw new Error(`bundles.yaml: ${b.id} commit must be a full 40-character SHA`);
     if (b.revision !== undefined && !(Number.isInteger(b.revision) && b.revision >= 2))
       throw new Error(`bundles.yaml: ${b.id} revision must be a whole number from 2 (leave it out for the first packaging)`);
+    if (b.skill !== undefined && (typeof b.skill?.folder !== "string" || !b.skill.folder || b.skill.folder.split(/[\\/]/).includes("..")))
+      throw new Error(`bundles.yaml: ${b.id} skill.folder must name a folder inside the upstream source`);
     if (b.python !== undefined && !/^3\.\d+$/.test(String(b.python)))
       throw new Error(`bundles.yaml: ${b.id} python must look like "3.13"`);
   }
@@ -207,6 +209,111 @@ export function listFiles(dir, base = dir) {
     return e.isDirectory() ? listFiles(full, base) : [path.relative(base, full).split(path.sep).join("/")];
   });
 }
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * A plain zip of the given entries (name -> bytes): files only, forward slashes, deflated, in name order,
+ * with a fixed timestamp so the same input gives the same bytes. Claude Desktop rejects some other zips
+ * (Windows tar's, 2026-11-22) as "invalid" for a .skill.
+ */
+export function writeZip(entries) {
+  const names = [...entries.keys()].sort();
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  const DOS_TIME = 0; // 00:00:00
+  const DOS_DATE = (2020 - 1980) << 9 | 1 << 5 | 1; // 2020-01-01
+  for (const name of names) {
+    if (name.endsWith("/") || name.includes("\\") || name.startsWith("/") || name.split("/").includes("..")) throw new Error(`bad zip entry name: ${name}`);
+    const data = entries.get(name);
+    const packed = zlib.deflateRawSync(data, { level: 9 });
+    const nameBuf = Buffer.from(name, "utf8");
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6); // UTF-8 names
+    local.writeUInt16LE(8, 8);
+    local.writeUInt16LE(DOS_TIME, 10);
+    local.writeUInt16LE(DOS_DATE, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(packed.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    local.writeUInt16LE(0, 28);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt16LE(DOS_TIME, 12);
+    central.writeUInt16LE(DOS_DATE, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(packed.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    locals.push(local, nameBuf, packed);
+    centrals.push(central, nameBuf);
+    offset += 30 + nameBuf.length + packed.length;
+  }
+  const centralSize = centrals.reduce((s, b) => s + b.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(names.length, 8);
+  end.writeUInt16LE(names.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, ...centrals, end]);
+}
+
+/** SKILL.md frontmatter `name` and `description` (simple `key: value` lines between the --- fences). */
+export function skillFrontmatter(text) {
+  const m = text.replace(/\r\n/g, "\n").match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return {};
+  const out = {};
+  for (const line of m[1].split("\n")) {
+    const kv = line.match(/^([a-z-]+):\s*(.*)$/);
+    if (kv) out[kv[1]] = kv[2].trim();
+  }
+  return out;
+}
+
+/**
+ * The .skill file for a bundle's `skill.folder`: upstream's skill folder unchanged, plus upstream's licence
+ * file and PACKAGED-BY.md inside it (Tresca's licence policy). Every entry sits under the one top-level
+ * folder, and SKILL.md is at its top, as Claude Desktop requires.
+ */
+export function skillEntries(b, upstreamDir, packagedByText) {
+  const folder = b.skill.folder.replace(/\\/g, "/").replace(/\/$/, "");
+  const name = folder.split("/").pop();
+  const dir = path.join(upstreamDir, ...folder.split("/"));
+  if (!fs.existsSync(path.join(dir, "SKILL.md"))) throw new Error(`${b.id}: skill folder ${folder} has no SKILL.md`);
+  const fm = skillFrontmatter(fs.readFileSync(path.join(dir, "SKILL.md"), "utf8"));
+  if (fm.name !== name) throw new Error(`${b.id}: SKILL.md name "${fm.name}" isn't its folder name "${name}"`);
+  if (!fm.description) throw new Error(`${b.id}: SKILL.md has no description`);
+  const files = listFiles(dir);
+  if (files.filter((f) => f.endsWith("/SKILL.md")).length) throw new Error(`${b.id}: the skill folder holds a nested SKILL.md`);
+  const licence = b.licenceFile ?? "LICENSE";
+  for (const f of [licence, "PACKAGED-BY.md"]) if (files.includes(f)) throw new Error(`${b.id}: the skill folder already has ${f}`);
+  const entries = new Map(files.map((f) => [`${name}/${f}`, fs.readFileSync(path.join(dir, f))]));
+  entries.set(`${name}/${licence}`, fs.readFileSync(path.join(upstreamDir, licence)));
+  entries.set(`${name}/PACKAGED-BY.md`, Buffer.from(packagedByText, "utf8"));
+  return { name, entries, upstreamFiles: files.map((f) => `${folder}/${f}`) };
+}
+
+export const skillFile = (b) => `${releaseName(b)}.skill`;
 
 /** All entries of a zip held in memory (handles a signature block appended after the archive). */
 export function readZip(zip) {

@@ -6,6 +6,8 @@
 # uv bundles need a .python-version: Claude Desktop installs them with `uv sync`, which otherwise takes the
 # newest Python, and a new Python has no Windows wheels yet for some packages, so the install fails
 # compiling them (Python 3.15, 2026-11-22). Upstream's file is used when it has one; otherwise set `python`.
+# `skill.folder` names a skill folder (with SKILL.md) in the upstream source: the release then also carries
+# <release>.skill, a plain zip of that folder unchanged plus the licence and PACKAGED-BY.md.
 
 bundles:
   - id: freecad-mcp
@@ -52,7 +54,12 @@ bundles:
     commit: 6f6a538255ca9f885232e845ac32f10b4433fe3e
     version: 1.8.0
     # r2: adds .python-version. 1.8.0 failed to install on Python 3.15 (pyyaml has no 3.15 wheel yet).
-    revision: 2
+    # r3: adds the project's drafting skill as a separate .skill file (owner decision 2026-11-22, path 1).
+    revision: 3
+    # The project's own skill (README "As a Claude Code plugin": "The server and the premium skill install
+    # together"). Claude Desktop can't load a skill from a .mcpb, so it ships as <release>.skill.
+    skill:
+      folder: .claude/skills/autocad-mcp-premium
     # requires-python >=3.11; every package locked for Windows has a 3.13 wheel (checked by the build).
     python: "3.13"
     licence: MIT                      # LICENSE at the tag; pyproject.toml license = "MIT"
