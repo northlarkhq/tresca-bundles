@@ -11,8 +11,9 @@ export function windowsMarker(marker) {
   return !/sys_platform == '(linux|darwin)'|platform_system == '(Linux|Darwin)'|sys_platform != 'win32'|platform_system != 'Windows'/.test(marker);
 }
 
-/** Runtime packages (name, version) from a uv.lock, walking from the root package with extras. */
-export function resolveUvLock(text, root) {
+/** Runtime packages (name, version) from a uv.lock, walking from the root package with extras.
+ * rootExtras: the project's own optional extras the bundle runs with (bundles.yaml `extras`). */
+export function resolveUvLock(text, root, rootExtras = []) {
   const blocks = text.replace(/\r\n/g, "\n").split(/\n\[\[package\]\]\n/).slice(1);
   const pkgs = new Map();
   for (const b of blocks) {
@@ -47,7 +48,7 @@ export function resolveUvLock(text, root) {
       for (const e of extras) for (const d of p.optional[e] ?? []) if (windowsMarker(d.marker)) walk(d.name, d.extras);
     }
   };
-  walk(root, []);
+  walk(root, rootExtras);
   seen.delete(root);
   return [...seen.keys()].sort().flatMap((name) => pkgs.get(name).map((v) => ({ name, version: v.version })));
 }
@@ -74,7 +75,7 @@ async function pypiLicence(name, version) {
 export async function checkDependencies(bundle, lockText) {
   const policy = loadYaml("licences.yaml");
   const overrides = new Map((policy.overrides ?? []).map((o) => [o.package.toLowerCase(), o]));
-  const deps = bundle.ecosystem === "pypi" ? resolveUvLock(lockText, bundle.lockRoot) : resolveNpmLock(lockText);
+  const deps = bundle.ecosystem === "pypi" ? resolveUvLock(lockText, bundle.lockRoot, bundle.extras ?? []) : resolveNpmLock(lockText);
   const rows = [];
   for (const d of deps) {
     let { licence, source } = bundle.ecosystem === "pypi" ? await pypiLicence(d.name, d.version) : { licence: d.licence, source: "package-lock.json" };

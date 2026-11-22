@@ -51,31 +51,51 @@ const ALIASES = [
   [/^isc( license \(iscl\)| license)?$/i, () => "ISC"],
   [/^(psf-2\.0|python software foundation license)$/i, () => "PSF-2.0"],
   [/^(mpl-2\.0|mozilla public license 2\.0 \(mpl 2\.0\))$/i, () => "MPL-2.0"],
+  [/^(the )?unlicense( \(unlicense\))?$/i, () => "Unlicense"],
 ];
 
-/** A licence string from PyPI or a lock file as SPDX-like ids; "A OR B" gives alternatives. */
-export function normaliseLicence(raw) {
+const alias = (p) => {
+  const t = p.trim();
+  for (const [re, f] of ALIASES) {
+    const m = t.match(re);
+    if (m) return f(m);
+  }
+  return t;
+};
+
+/** A licence string from PyPI or a lock file as alternatives ("A OR B"), each a list of ids that all apply
+ * ("A AND B": a package whose files carry several licences, such as numpy). */
+export function licenceAlternatives(raw) {
   const text = String(raw ?? "").trim();
   if (!text || /^unknown$/i.test(text)) return [];
   const inner = text.startsWith("(") && text.endsWith(")") ? text.slice(1, -1) : text;
-  const parts = inner.split(/\s+OR\s+|\s+\/\s+/);
-  return parts.map((p) => {
-    const t = p.trim();
-    for (const [re, f] of ALIASES) {
-      const m = t.match(re);
-      if (m) return f(m);
-    }
-    return t;
-  });
+  // "(A AND B) OR C": brackets only around a whole alternative are grouping; others belong to a name such
+  // as "Mozilla Public License 2.0 (MPL 2.0)".
+  const group = (alt) => (/^\(.*\)$/.test(alt.trim()) && /\s+AND\s+/.test(alt) ? alt.trim().slice(1, -1) : alt);
+  return inner.split(/\s+OR\s+|\s+\/\s+/).map((alt) => group(alt).split(/\s+AND\s+/).map(alias));
 }
 
-/** allowed: SPDX-like ids from licences.yaml. A package passes when any alternative is allowed. */
+/** A licence string as SPDX-like ids, alternatives joined with " AND " where all parts apply. */
+export function normaliseLicence(raw) {
+  return licenceAlternatives(raw).map((parts) => parts.join(" AND "));
+}
+
+/** allowed: SPDX-like ids from licences.yaml. A package passes when, for one alternative, every licence that
+ * applies ("A AND B") is allowed. */
 export function licenceDecision(raw, allowed) {
-  const ids = normaliseLicence(raw);
-  if (!ids.length) return { ok: false, reason: "unknown licence" };
-  if (ids.some((id) => /GPL/i.test(id)) && !ids.some((id) => allowed.includes(id))) return { ok: false, reason: `copyleft: ${ids.join(" OR ")}` };
-  const hit = ids.find((id) => allowed.includes(id));
-  return hit ? { ok: true, licence: hit } : { ok: false, reason: `not allowed: ${ids.join(" OR ")}` };
+  const alts = licenceAlternatives(raw);
+  if (!alts.length) return { ok: false, reason: "unknown licence" };
+  const shown = alts.map((parts) => parts.join(" AND ")).join(" OR ");
+  const hit = alts.find((parts) => parts.every((id) => allowed.includes(id)));
+  if (hit) return { ok: true, licence: hit.join(" AND ") };
+  if (alts.some((parts) => parts.some((id) => /GPL/i.test(id)))) return { ok: false, reason: `copyleft: ${shown}` };
+  return { ok: false, reason: `not allowed: ${shown}` };
+}
+
+/** Environment settings the bundle sets that no upstream source file names (as a quoted string), so the
+ * server would ignore them. */
+export function settingsNotFound(keys, sourceTexts) {
+  return keys.filter((k) => !sourceTexts.some((t) => t.includes(`"${k}"`) || t.includes(`'${k}'`)));
 }
 
 // ---- Manifest ---------------------------------------------------------------
