@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import zlib from "node:zlib";
-import { buildManifest, bundleFile, licenceDecision, missingWheels, normaliseLicence, packagedBy, pinnedPython, readZip, releaseName, settingsNotFound } from "../scripts/lib.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { buildManifest, bundleFile, licenceDecision, missingWheels, normaliseLicence, packagedBy, pinnedPython, readZip, releaseName, settingsNotFound, skillEntries, skillFile, skillFrontmatter, writeZip } from "../scripts/lib.mjs";
 import { resolveNpmLock, resolveUvLock, windowsMarker } from "../scripts/licences.mjs";
 import { oldEnough, setVersion } from "../scripts/upstream-check.mjs";
 
@@ -185,6 +188,35 @@ test("dependencies without a Windows wheel for the pinned Python are found", () 
   const deps = ["pyyaml@6.0.3", "pure@1.0", "stable@2.0", "linuxonly@1.0"].map((d) => ({ name: d.split("@")[0], version: d.split("@")[1] }));
   assert.deepEqual(missingWheels(lock, deps, "3.13"), ["linuxonly 1.0"]);
   assert.deepEqual(missingWheels(lock, deps, "3.15"), ["pyyaml 6.0.3", "linuxonly 1.0"]);
+});
+
+test("writeZip makes a plain zip that readZip reads back, the same bytes every time", () => {
+  const entries = new Map([["s/SKILL.md", Buffer.from("---\nname: s\n---\n")], ["s/a/b.md", Buffer.from("x".repeat(5000))]]);
+  const zip = writeZip(entries);
+  const back = readZip(zip);
+  assert.deepEqual([...back.keys()].sort(), ["s/SKILL.md", "s/a/b.md"]);
+  assert.equal(back.get("s/a/b.md").toString(), "x".repeat(5000));
+  assert.ok(writeZip(entries).equals(zip));
+  assert.throws(() => writeZip(new Map([["s\\x.md", Buffer.alloc(1)]])), /bad zip entry/);
+  assert.throws(() => writeZip(new Map([["../x.md", Buffer.alloc(1)]])), /bad zip entry/);
+});
+
+test("a .skill holds the skill folder unchanged, plus the licence and PACKAGED-BY.md, under one folder", () => {
+  const up = fs.mkdtempSync(path.join(os.tmpdir(), "skill-"));
+  const dir = path.join(up, ".claude", "skills", "demo");
+  fs.mkdirSync(path.join(dir, "references"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: demo\ndescription: Use for x -> y.\n---\nBody\n");
+  fs.writeFileSync(path.join(dir, "references", "r.md"), "ref");
+  fs.writeFileSync(path.join(up, "LICENSE"), "MIT");
+  const b = { id: "x", version: "1.0.0", revision: 3, licenceFile: "LICENSE", skill: { folder: ".claude/skills/demo" } };
+  const s = skillEntries(b, up, "packaged");
+  assert.equal(s.name, "demo");
+  assert.deepEqual([...s.entries.keys()].sort(), ["demo/LICENSE", "demo/PACKAGED-BY.md", "demo/SKILL.md", "demo/references/r.md"]);
+  assert.deepEqual(s.upstreamFiles.sort(), [".claude/skills/demo/SKILL.md", ".claude/skills/demo/references/r.md"]);
+  assert.equal(skillFile(b), "x-1.0.0-r3.skill");
+  fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: other\ndescription: d\n---\n");
+  assert.throws(() => skillEntries(b, up, "p"), /isn't its folder name/);
+  assert.deepEqual(skillFrontmatter("---\r\nname: demo\r\ndescription: Use it\r\n---\r\n"), { name: "demo", description: "Use it" });
 });
 
 test("readZip reads entries after an appended signature block", () => {
