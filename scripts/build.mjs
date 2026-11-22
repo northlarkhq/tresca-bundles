@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { checkDependencies, licenceReport } from "./licences.mjs";
-import { ROOT, buildManifest, bundleFile, findBundle, listFiles, packagedBy, readZip, releaseName, settingsNotFound, sha256 } from "./lib.mjs";
+import { ROOT, buildManifest, bundleFile, findBundle, listFiles, missingWheels, packagedBy, pinnedPython, readZip, releaseName, settingsNotFound, sha256 } from "./lib.mjs";
 
 const ADDED = ["manifest.json", "PACKAGED-BY.md", "DEPENDENCY-LICENCES.md"];
 
@@ -69,6 +69,11 @@ async function main() {
   const sourceTexts = upstreamFiles.filter((f) => /\.(py|js|mjs|ts)$/.test(f)).map((f) => fs.readFileSync(path.join(upstreamDir, f), "utf8"));
   const unknown = settingsNotFound(Object.keys(b.server?.mcp_config?.env ?? {}), sourceTexts);
   if (unknown.length) throw new Error(`upstream source never reads these settings the bundle sets: ${unknown.join(", ")}`);
+  // The Python uv installs with (pinnedPython explains why). bundles.yaml `python` is written as .python-version.
+  const pyFile = path.join(upstreamDir, ".python-version");
+  const python = pinnedPython(b, upstreamFiles.includes(".python-version") ? fs.readFileSync(pyFile, "utf8") : undefined);
+  const added = b.python !== undefined ? [...ADDED, ".python-version"] : ADDED;
+  if (b.python !== undefined) fs.writeFileSync(pyFile, `${b.python}\n`);
 
   // 3. Dependency licences.
   const result = await checkDependencies(b, fs.readFileSync(path.join(upstreamDir, b.lockfile), "utf8"));
@@ -76,6 +81,11 @@ async function main() {
   fs.writeFileSync(path.join(out, `${releaseName(b)}.licences.md`), report);
   const bad = result.rows.filter((r) => !r.ok);
   console.log(`${id}: ${result.rows.length} dependencies checked, ${bad.length} not allowed`);
+  if (python) {
+    const noWheel = missingWheels(fs.readFileSync(path.join(upstreamDir, b.lockfile), "utf8"), result.rows, python);
+    if (noWheel.length) throw new Error(`no Windows wheel for Python ${python}, so uv would have to compile: ${noWheel.join(", ")}`);
+    console.log(`${id}: Python ${python}, every dependency has a Windows wheel`);
+  }
   if (bad.length) throw new Error(`licence check failed:\n${bad.map((r) => `  ${r.name} ${r.version}: ${r.reason} (${r.licence})`).join("\n")}`);
 
   // 4. Add Tresca's files and pack. Packed twice so PACKAGED-BY.md can name any files the CLI leaves out.
@@ -98,9 +108,9 @@ async function main() {
     if (!entries.has(f)) continue;
     if (sha256(entries.get(f)) !== sha256(fs.readFileSync(path.join(upstreamDir, f)))) throw new Error(`${f} differs from upstream`);
   }
-  const extra = [...entries.keys()].filter((f) => !upstreamFiles.includes(f) && !ADDED.includes(f));
+  const extra = [...entries.keys()].filter((f) => !upstreamFiles.includes(f) && !added.includes(f));
   if (extra.length) throw new Error(`unexpected files in the bundle: ${extra.join(", ")}`);
-  for (const f of [...ADDED, b.licenceFile ?? "LICENSE"]) if (!entries.has(f)) throw new Error(`bundle lacks ${f}`);
+  for (const f of [...added, b.licenceFile ?? "LICENSE"]) if (!entries.has(f)) throw new Error(`bundle lacks ${f}`);
   if (b.server.type === "uv" && !entries.has(b.lockfile)) throw new Error(`bundle lacks ${b.lockfile}, so uv wouldn't install the checked versions`);
 
   const hash = sha256(fs.readFileSync(file));

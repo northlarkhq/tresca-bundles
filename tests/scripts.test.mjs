@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import zlib from "node:zlib";
-import { buildManifest, licenceDecision, normaliseLicence, packagedBy, readZip, settingsNotFound } from "../scripts/lib.mjs";
+import { buildManifest, bundleFile, licenceDecision, missingWheels, normaliseLicence, packagedBy, pinnedPython, readZip, releaseName, settingsNotFound } from "../scripts/lib.mjs";
 import { resolveNpmLock, resolveUvLock, windowsMarker } from "../scripts/licences.mjs";
 import { oldEnough, setVersion } from "../scripts/upstream-check.mjs";
 
@@ -149,6 +149,42 @@ test("bundles.yaml version bump changes only tag, commit and version of one entr
   const text = ["bundles:", "  - id: a", "    tag: v1 # pinned", "    commit: c1", "    version: 1", "  - id: b", "    tag: v5", "    commit: c5", "    version: 5", ""].join("\n");
   const out = setVersion(text, "a", { tag: "v2", commit: "c2", version: "2" });
   assert.equal(out, text.replace("tag: v1", "tag: v2").replace("commit: c1", "commit: c2").replace("version: 1", "version: 2"));
+});
+
+test("a repackaging gets its own release name; the first packaging has none", () => {
+  assert.equal(releaseName({ id: "x", version: "1.8.0" }), "x-1.8.0");
+  assert.equal(bundleFile({ id: "x", version: "1.8.0", revision: 2 }), "x-1.8.0-r2.mcpb");
+});
+
+test("a version bump drops the revision", () => {
+  const text = ["bundles:", "  - id: a", "    tag: v1", "    commit: c1", "    version: 1", "    revision: 2", "  - id: b", "    revision: 3", ""].join("\n");
+  const out = setVersion(text, "a", { tag: "v2", commit: "c2", version: "2" });
+  assert.ok(!out.includes("revision: 2"));
+  assert.ok(out.includes("revision: 3"));
+});
+
+test("uv bundles pin Python from upstream's .python-version or bundles.yaml, not both", () => {
+  const uv = { id: "x", server: { type: "uv" } };
+  assert.equal(pinnedPython(uv, "3.12\n"), "3.12");
+  assert.equal(pinnedPython({ ...uv, python: "3.13" }, undefined), "3.13");
+  assert.throws(() => pinnedPython(uv, undefined), /no \.python-version/);
+  assert.throws(() => pinnedPython({ ...uv, python: "3.13" }, "3.12"), /leave python out/);
+  assert.equal(pinnedPython({ id: "n", server: { type: "node" } }, undefined), null);
+});
+
+test("dependencies without a Windows wheel for the pinned Python are found", () => {
+  const pkg = (name, version, wheels) =>
+    `\n[[package]]\nname = "${name}"\nversion = "${version}"\nwheels = [\n${wheels.map((w) => `    { url = "https://files.example/${w}" },`).join("\n")}\n]`;
+  const lock = [
+    "version = 1",
+    pkg("pyyaml", "6.0.3", ["pyyaml-6.0.3-cp313-cp313-win_amd64.whl", "pyyaml-6.0.3-cp314-cp314-win_amd64.whl"]),
+    pkg("pure", "1.0", ["pure-1.0-py3-none-any.whl"]),
+    pkg("stable", "2.0", ["stable-2.0-cp39-abi3-win_amd64.whl"]),
+    pkg("linuxonly", "1.0", ["linuxonly-1.0-cp315-cp315-manylinux_2_17_x86_64.whl"]),
+  ].join("\n");
+  const deps = ["pyyaml@6.0.3", "pure@1.0", "stable@2.0", "linuxonly@1.0"].map((d) => ({ name: d.split("@")[0], version: d.split("@")[1] }));
+  assert.deepEqual(missingWheels(lock, deps, "3.13"), ["linuxonly 1.0"]);
+  assert.deepEqual(missingWheels(lock, deps, "3.15"), ["pyyaml 6.0.3", "linuxonly 1.0"]);
 });
 
 test("readZip reads entries after an appended signature block", () => {

@@ -49,6 +49,9 @@ export function setVersion(text, id, { tag, commit, version }) {
   set("tag", tag);
   set("commit", commit);
   set("version", version);
+  // A new upstream version is a first packaging again.
+  const r = lines.slice(start, end).findIndex((l) => /^    revision: /.test(l));
+  if (r >= 0) lines.splice(start + r, 1);
   return lines.join("\n");
 }
 
